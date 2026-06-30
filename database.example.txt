@@ -1,0 +1,12 @@
+Параметры подключения к БД (ШАБЛОН — без паролей).
+Реальные креды задавать через userConfig плагина, env BUHTA_* или tools/db.local.json
+(скопировать из tools/db.example.json). Пароли в репозиторий НЕ коммитятся.
+
+Исходники программы на Delphi — в каталоге BM (c:\BM).
+
+База данных одного из клиентов ERP (для отладки/проверки):
+  mssql server 2022: gold
+  db: <база_клиента>
+  login: sa
+  password: <в db.local.json / userConfig>
+

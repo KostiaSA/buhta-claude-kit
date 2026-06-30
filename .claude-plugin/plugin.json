@@ -1,0 +1,31 @@
+{
+  "name": "buhta",
+  "displayName": "БУХта (формы / отчёты)",
+  "version": "1.0.0",
+  "description": "Skills и tools для доработки legacy-системы БУХта: пользовательские формы dream, печатные шаблоны FastReport, работа через HTTP-сервер автоматизации и MSSQL. Расчёт зарплаты/налогов — в отдельном плагине.",
+  "author": { "name": "KostiaSA" },
+  "keywords": ["buhta", "формы", "отчёты", "fastreport", "delphi", "mssql"],
+  "userConfig": {
+    "server": {
+      "type": "string",
+      "title": "MSSQL server",
+      "description": "Хост MSSQL-сервера, напр. gold"
+    },
+    "database": {
+      "type": "string",
+      "title": "БД (эталон)",
+      "description": "База данных по умолчанию, напр. Стандартная"
+    },
+    "uid": {
+      "type": "string",
+      "title": "Логин MSSQL",
+      "description": "Имя пользователя MSSQL, напр. sa"
+    },
+    "pwd": {
+      "type": "string",
+      "title": "Пароль MSSQL",
+      "description": "Пароль пользователя MSSQL",
+      "sensitive": true
+    }
+  }
+}

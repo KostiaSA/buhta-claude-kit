@@ -1,0 +1,12 @@
+{
+  "name": "buhta-claude",
+  "owner": { "name": "KostiaSA" },
+  "description": "Плагины Claude для работы с системой БУХта (зарплата, налоги, формы, отчёты)",
+  "plugins": [
+    {
+      "name": "buhta",
+      "source": "./",
+      "description": "Skills и tools БУХта: формы dream, печатные шаблоны FastReport, инструменты MSSQL/HTTP-автоматизации"
+    }
+  ]
+}

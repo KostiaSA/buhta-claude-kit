@@ -1,0 +1,18 @@
+# Локальные настройки Claude Code (для конкретной машины)
+settings.local.json
+.claude/settings.local.json
+
+# Локальные креды БД (не коммитить!) — копия db.example.json с реальным паролем
+tools/db.local.json
+
+# Рабочий скрэтч инструментов (вывод запросов, выгруженные формы/отчёты)
+tools/_*
+
+# Кэш Python
+__pycache__/
+*.pyc
+
+# Служебные файлы ОС
+Thumbs.db
+desktop.ini
+.DS_Store

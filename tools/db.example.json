@@ -1,0 +1,7 @@
+{
+  "server": "gold",
+  "database": "Стандартная",
+  "uid": "sa",
+  "pwd": "<ВАШ_ПАРОЛЬ>",
+  "driver": "ODBC Driver 18 for SQL Server"
+}
