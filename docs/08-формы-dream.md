@@ -83,7 +83,86 @@ python tools/buhta_client.py --form-set-dfm "<имя>" f.dfm        # запис
 
 ---
 
-## 4. Границы / безопасность
+## 4. Рецепт: обновление списка-справочника из HotKeyForm
+
+`HotKeyForm` вызывается по горячей клавише **из списка** (справочник ТМЦ, Организации и т.п.). После
+`ExecuteSQL(...)`, изменившего запись, нужно освежить строку в списке-владельце.
+
+### Доступ к владельцу через `Owner`
+В скрипте формы `Owner` — это **форма-владелец**, из которой вызвали HotKey (для справочников это
+`TbmLookForm`/`TTMCLookForm`/`TOrgLookForm`, `bmLookFormUnit.pas:16`). Опубликованные поля владельца
+доступны напрямую: `Owner.Grid`, `Owner.SaveButton` и т.п. (грид справочника — `Grid: TbmGrid`,
+`bmLookFormUnit.pas:18`).
+
+### Обновить только текущую (focused) строку
+```pascal
+Owner.Grid.RefreshRow;   // перечитать из БД и перерисовать ТОЛЬКО текущую строку
+```
+`TbmGrid.RefreshRow` (`bmGrid.pas:15608`) делает всё как надо: `FView.RecNo:=FocusedNode.Data` →
+`View.RefreshRow` (перечитать запись) → `RefreshRow2` (**сбросить кэш ячеек узла** `Node.Strings`) → `Paint`.
+Обновляется ровно та запись, что была в фокусе (её `Ключ` и попал во временную таблицу `[#…]`).
+
+Полная перезагрузка списка (тяжелее, когда точечно нельзя): `Owner.Grid.LoadData;`
+(оба метода зарегистрированы для скрипта — `import/bmGrid_imp.pas:1124` и `:443`).
+
+### Почему не `OkResult` и не `_SendMessage`
+- Встроенный авто-refresh по `OkResult:=True` (`TbmGrid.InternalAfterCallWizard`, `bmGrid.pas:17486`)
+  для одиночной строки зовёт **только** `FView.RefreshRow` — **без** `RefreshRow2`/`Paint`. Данные в БД
+  меняются, но текст ячейки кэшируется в `Node.Strings` (`GetDrawValue`, `bmGrid.pas:3791`) и остаётся
+  старым. Поэтому визуально «не обновляется».
+- Паттерн `_SendMessage(Owner.Handle, BM_DOGSPECGRIDREFRESH, 0, 0)` работает **только** для форм, которые
+  сами ловят это сообщение (`TbmDogEditForm`, `message BM_DOGSPECGRIDREFRESH`, `bmDogEditForm.pas:221`).
+  У `TbmLookForm` такого обработчика нет, а `BM_GridLoadData` даже не зарегистрирован как скрипт-константа —
+  поэтому для справочника проще и надёжнее вызвать метод грида напрямую (`Owner.Grid.RefreshRow`).
+
+### Частный случай: `_SendMessage` в форму-владельца с обработчиком (рабочий код)
+Если владелец — **форма, которая сама ловит сообщение обновления**, то паттерн из «догспека» рабочий:
+`Owner` = `TbmDogEditForm`, он обрабатывает `BM_DOGSPECGRIDREFRESH` (`bmDogEditForm.pas:221`) и перерисовывает
+свой грид спецификации. `_SendMessage` и `BM_DOGSPECGRIDREFRESH` зарегистрированы для скрипта
+(`import/bmVBInterface_imp.pas:2776`, `import/bmConst_imp.pas:1034`):
+```pascal
+procedure THotKeyForm.FormOkButtonClick(Sender: TObject);
+begin
+  try
+    ExecuteSQL( 'UPDATE Догспец SET [Субконто 1]='+IntegerAsSQL(PodrEdit.Value) +Chr(13)+
+      ' ,[Status] = CASE Status WHEN 1 THEN 1 WHEN 4 THEN 1 WHEN 2 THEN 2 WHEN 3 THEN 3 WHEN 0 THEN 2 END '+Chr(13)+
+      'FROM [#Изменить подразделение] '+Chr(13)+
+      'INNER JOIN #Догспец Догспец ON Догспец.Ключ=RecordID AND [Тип Субконто 1]=''Под'' '+
+        'AND [Субконто 1]<>'+IntegerAsSQL(PodrEdit.Value) );
+    _SendMessage(Owner.Handle, BM_DOGSPECGRIDREFRESH, 0, 0);   // перерисовать грид догспека
+    Owner.SaveButton.Enabled:=True;                            // владелец «испачкан» -> дать сохранить
+    bmInformation( 'Записи сохранены.' );
+  except
+    bmError( 'Ошибка при обработке.' );
+  end;
+  Close;
+end;
+```
+Отличие от справочника: у `EditForm` данные держатся в памяти (спека договора не сохранена в БД до нажатия
+«Сохранить»), поэтому и обновление идёт **сообщением в форму** (она знает, как перечитать свой грид), плюс
+взводится `SaveButton.Enabled`. У `LookForm` данные уже в БД — там точечный `Owner.Grid.RefreshRow`.
+
+### Готовый образец
+```pascal
+procedure THotKeyForm.FormOkButtonClick(Sender: TObject);
+begin
+  try
+    ExecuteSQL( 'UPDATE ТМЦ SET [_КодЗаповедника]='+IntegerAsSQL(SertEdit.Value)+
+      ' FROM [#Проставить Код Заповедника] '+
+      ' INNER JOIN ТМЦ ON ТМЦ.Ключ=RecordID AND [_КодЗаповедника]<>'+IntegerAsSQL(SertEdit.Value) );
+    Owner.Grid.RefreshRow;                        // обновить только текущую строку списка
+    bmInformation( 'Код Заповедника сохранён.' );
+  except
+    bmError( 'Ошибка при обработке.' );
+  end;
+  Close;
+end;
+```
+Вызывать `Owner.Grid.RefreshRow` **до** `Close` (пока владелец жив и focused-узел на месте).
+
+---
+
+## 5. Границы / безопасность
 - Правки идут в **БД подключённого .exe** (клиентская копия); перенос в эталон «Стандартная» — отдельный шаг.
 - Проверка синтаксиса — **лёгкая** (без запуска формы, без побочных эффектов).
 - Запуск формы и нажатие кнопок (`/form/run`, `/form/click`) — **следующая итерация** (экспериментально:
