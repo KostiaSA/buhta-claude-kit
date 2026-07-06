@@ -29,6 +29,17 @@ Usage:
   python buhta_client.py --report-print "<ключ>" [-p "имя=значение"]  -- print by name
   python buhta_client.py --report-print-doc "<таблица>" --ids "1,2,3" [--vid V]  -- doc-linked print
 
+  python buhta_client.py --gen-doc-vids                  -- document kinds that have generation settings
+  python buhta_client.py --gen-rules 1                   -- generation rules for a document kind
+  python buhta_client.py --gen-rule-get 218              -- one rule, all columns -> tools\\_out.txt
+  python buhta_client.py --gen-rule-set 218 -f "Сумма=Докспец.Сумма" -f "Приоритет=5"  -- edit fields (+auto refresh proc)
+  python buhta_client.py --gen-proc-sql 1                -- generated CREATE PROCEDURE text -> tools\\_gen_proc_1.sql
+  python buhta_client.py --gen-proc-db 1                 -- current proc text from DB -> tools\\_gen_proc_1_db.sql
+  python buhta_client.py --gen-proc-refresh 1            -- (re)create the generation stored procedure (ALTER/CREATE)
+  python buhta_client.py --gen-proc-recreate 1           -- DROP+CREATE the generation stored procedure (clean)
+  python buhta_client.py --gen-run 12345                 -- run generation for one document by key
+  python buhta_client.py --gen-provodki 12345            -- postings produced for a document
+
 Full JSON result is written (pretty, UTF-8) to tools\\_out.txt; a short summary
 is printed. Importable: run_query(name, params=None, top=None) -> dict, ping().
 """
@@ -223,6 +234,65 @@ def report_print_doc(table, ids=None, vid=None):
     return _post("/report/print-doc", body, timeout=600)
 
 
+# ---- posting generation ([Генерация] -> _авто_Документ_<N>_генерация -> [Проводка]) ----
+
+def gen_doc_vids():
+    """Document kinds that have generation settings (vid, name, rules, has_proc)."""
+    return _post("/gen/doc-vids", {})
+
+
+def gen_rules(docvid):
+    """All generation rules for a document kind."""
+    return _post("/gen/rules", {"docvid": int(docvid)})
+
+
+def gen_rule_get(key):
+    """One generation rule ([Генерация]), all columns."""
+    return _post("/gen/rule/get", {"key": int(key)})
+
+
+def gen_rule_set(key, fields):
+    """Update rule fields (dict column->value) and auto-refresh the stored proc.
+    Value None writes SQL NULL; other values are typed server-side by column type,
+    so numbers may be passed as strings ('10.9' -> varchar, '5' -> int/money)."""
+    return _post("/gen/rule/set", {"key": int(key), "fields": fields}, timeout=600)
+
+
+def gen_proc_sql(docvid):
+    """Generated CREATE PROCEDURE text for a kind (NOT executed)."""
+    return _post("/gen/proc/sql", {"docvid": int(docvid)}, timeout=600)
+
+
+def gen_proc_db(docvid):
+    """Current stored-proc text from the DB (OBJECT_DEFINITION)."""
+    return _post("/gen/proc/db", {"docvid": int(docvid)})
+
+
+def gen_proc_refresh(docvid):
+    """(Re)create the per-kind generation stored procedure (ALTER if it exists)."""
+    return _post("/gen/proc/refresh", {"docvid": int(docvid)}, timeout=600)
+
+
+def gen_proc_recreate(docvid):
+    """DROP + CREATE the per-kind generation stored procedure (clean rebuild)."""
+    return _post("/gen/proc/recreate", {"docvid": int(docvid)}, timeout=600)
+
+
+def gen_run(docid):
+    """Run generation for one document by key (writes [Проводка] + [История])."""
+    return _post("/gen/run", {"docid": int(docid)}, timeout=600)
+
+
+def gen_provodki(docid):
+    """Postings produced for a document (read back [Проводка])."""
+    return _post("/gen/provodki", {"docid": int(docid)})
+
+
+def _gen_proc_file(docvid, suffix=""):
+    """Local .sql path to save a generation procedure's text for inspection."""
+    return os.path.join(os.path.dirname(OUT), "_gen_proc_%s%s.sql" % (docvid, suffix))
+
+
 def _report_files(name, ext):
     """Local file paths to round-trip a template body / its [Данные] config."""
     safe = re.sub(r'[^0-9A-Za-zА-Яа-яЁё _-]', '_', name)
@@ -405,6 +475,108 @@ def main():
         res = report_print_doc(table, ids=o.get("ids"), vid=o.get("vid"))
         _save(res)
         print("OK -> tools\\_out.txt" if res.get("ok") else f"ERROR: {res.get('error')}")
+        return
+
+    # ---- posting generation commands ----
+    if args[0] == "--gen-doc-vids":
+        res = gen_doc_vids()
+        _save(res)
+        if res.get("ok"):
+            print(f"OK count={res.get('count')} -> tools\\_out.txt")
+            for d in res.get("docvids", [])[:300]:
+                flag = "proc" if d.get("has_proc") else "----"
+                print(f"  [{flag}] вид={str(d.get('vid')):>5}  rules={str(d.get('rules')):>3}  {d.get('name','')}")
+        else:
+            print(f"ERROR: {res.get('error')}")
+        return
+
+    if args[0] == "--gen-rules":
+        res = gen_rules(args[1])
+        _save(res)
+        if res.get("ok"):
+            print(f"OK docvid={res.get('docvid')} count={res.get('count')} -> tools\\_out.txt")
+            for r in res.get("rules", [])[:300]:
+                print(f"  Ключ={r.get('Ключ')}  приор={r.get('Приоритет')}  "
+                      f"{r.get('Дебет')} / {r.get('Кредит')}  Сумма={r.get('Сумма')!r}")
+        else:
+            print(f"ERROR: {res.get('error')}")
+        return
+
+    if args[0] == "--gen-rule-get":
+        res = gen_rule_get(args[1])
+        _save(res)
+        print("OK -> tools\\_out.txt" if res.get("ok") else f"ERROR: {res.get('error')}")
+        return
+
+    if args[0] == "--gen-rule-set":
+        key = args[1]
+        fields = {}
+        i = 2
+        while i < len(args):
+            if args[i] in ("-f", "--field"):
+                k, _, v = args[i + 1].partition("=")
+                fields[k] = None if v == "@null" else v
+                i += 2
+            else:
+                i += 1
+        if not fields:
+            print("ERROR: no fields given (use -f \"Колонка=значение\")")
+            return
+        res = gen_rule_set(key, fields)
+        _save(res)
+        if res.get("ok"):
+            print(f"OK key={res.get('key')} docvid={res.get('docvid')} "
+                  f"updated={res.get('updated')} (proc refreshed) -> tools\\_out.txt")
+        else:
+            print(f"ERROR: {res.get('error')}")
+        return
+
+    if args[0] in ("--gen-proc-sql", "--gen-proc-db"):
+        docvid = args[1]
+        res = gen_proc_sql(docvid) if args[0] == "--gen-proc-sql" else gen_proc_db(docvid)
+        _save(res)
+        if res.get("ok"):
+            suffix = "" if args[0] == "--gen-proc-sql" else "_db"
+            fn = _gen_proc_file(docvid, suffix)
+            with open(fn, "w", encoding="utf-8", newline="") as f:
+                f.write(res.get("sql", ""))
+            extra = "" if res.get("exists", True) else "  (proc does NOT exist in DB)"
+            print(f"OK name={res.get('name')}{extra}")
+            print(f"  sql -> {fn}")
+        else:
+            print(f"ERROR: {res.get('error')}")
+        return
+
+    if args[0] in ("--gen-proc-refresh", "--gen-proc-recreate"):
+        fn = gen_proc_refresh if args[0] == "--gen-proc-refresh" else gen_proc_recreate
+        res = fn(args[1])
+        _save(res)
+        if res.get("ok"):
+            print(f"OK {res.get('name')} action={res.get('action')}")
+        else:
+            print(f"ERROR: {res.get('error')}")
+        return
+
+    if args[0] == "--gen-run":
+        res = gen_run(args[1])
+        _save(res)
+        if res.get("ok"):
+            print(f"OK docid={res.get('docid')} docvid={res.get('docvid')} "
+                  f"provodki={res.get('provodki')}")
+        else:
+            print(f"ERROR: {res.get('error')}")
+        return
+
+    if args[0] == "--gen-provodki":
+        res = gen_provodki(args[1])
+        _save(res)
+        if res.get("ok"):
+            print(f"OK docid={res.get('docid')} count={res.get('count')} -> tools\\_out.txt")
+            for pr in res.get("provodki", [])[:300]:
+                print(f"  {pr.get('Дебет')} -> {pr.get('Кредит')}  "
+                      f"Сумма={pr.get('Сумма')}  {pr.get('Примечание','')}")
+        else:
+            print(f"ERROR: {res.get('error')}")
         return
 
     if args[0] in ("--add", "--remove", "--style"):
