@@ -2,7 +2,7 @@
   "name": "buhta",
   "displayName": "БУХта (формы / отчёты)",
   "version": "1.0.0",
-  "description": "Skills и tools для доработки legacy-системы БУХта: пользовательские формы dream, печатные шаблоны FastReport, работа через HTTP-сервер автоматизации и MSSQL. Расчёт зарплаты/налогов — в отдельном плагине.",
+  "description": "Skills и tools для доработки legacy-системы БУХта: именованные запросы SchemaView, пользовательские формы dream, печатные шаблоны FastReport, работа через HTTP-сервер автоматизации и MSSQL. Расчёт зарплаты/налогов — в отдельном плагине.",
   "author": { "name": "KostiaSA" },
   "keywords": ["buhta", "формы", "отчёты", "fastreport", "delphi", "mssql"],
   "userConfig": {

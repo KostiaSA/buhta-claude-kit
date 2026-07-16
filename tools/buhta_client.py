@@ -6,6 +6,7 @@ The server listens ONLY on 127.0.0.1:8765 and must be started by launching the
 
 Usage:
   python buhta_client.py --ping
+  python buhta_client.py --query-list [--filter Подр] [--root Сотрудник]  -- find named queries (SchemaView)
   python buhta_client.py "Подразделение"                 -- run a named query
   python buhta_client.py "Подразделение" --top 50
   python buhta_client.py "Подразделение" --sql            -- print generated SQL (no exec)
@@ -98,6 +99,34 @@ def run_query(name, params=None, top=None):
 def run_query_sql(name, params=None, top=None):
     """Return the SQL generated for a named query WITHOUT executing it."""
     return _post("/query/sql", _payload(name, params, top))
+
+
+def query_list(filter=None, root=None, top=200):
+    """Find named queries (SchemaView) by ViewName/RootTable substring.
+
+    Reads schema metadata straight from the DB (like q.py) — no running .exe
+    needed, since SchemaView is distributed from the etalon and is the same
+    across copies. Returns {"ok":True,"count":N,"views":[{name,root,oborot}]}.
+    """
+    import pyodbc  # lazy: HTTP-only commands must not require pyodbc/ODBC
+    where, vals = [], []
+    if filter:
+        where.append("ViewName LIKE ?"); vals.append("%" + filter + "%")
+    if root:
+        where.append("RootTable LIKE ?"); vals.append("%" + root + "%")
+    sql = ("SELECT TOP (%d) ViewName, RootTable, Oborot FROM SchemaView"
+           % int(top))
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY ViewName"
+    try:
+        cn = pyodbc.connect(dbconfig.get_conn_str())
+        rows = cn.cursor().execute(sql, *vals).fetchall()
+        cn.close()
+    except Exception as e:  # noqa: BLE001 — surface as a JSON error like the server
+        return {"ok": False, "error": str(e)}
+    views = [{"name": r[0], "root": r[1], "oborot": bool(r[2])} for r in rows]
+    return {"ok": True, "count": len(views), "views": views}
 
 
 def add_field(view, path, color=None, width=None, caption=None):
@@ -326,6 +355,21 @@ def main():
             else:
                 j += 1
         return o
+
+    # ---- named query (SchemaView) commands ----
+    if args[0] == "--query-list":
+        o = flags(args[1:])
+        res = query_list(filter=o.get("filter"), root=o.get("root"),
+                         top=o.get("top", 200))
+        _save(res)
+        if res.get("ok"):
+            print(f"OK count={res.get('count')} -> tools\\_out.txt")
+            for v in res.get("views", [])[:100]:
+                mark = "  [оборотка]" if v.get("oborot") else ""
+                print(f"  {v['name']}  <- {v['root']}{mark}")
+        else:
+            print(f"ERROR: {res.get('error')}")
+        return
 
     # ---- dream form commands ----
     if args[0] == "--form-list":
